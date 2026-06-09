@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "INSERT_YOUR_PROJECT_NUMBER_HERE",
+    "project_id": "INSERT_YOUR_PROJECT_ID_HERE",
+    "storage_bucket": "INSERT_YOUR_PROJECT_ID_HERE.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "INSERT_YOUR_MOBILESDK_APP_ID_HERE",
+        "android_client_info": {
+          "package_name": "com.finmate.frontend"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "INSERT_YOUR_OAUTH_CLIENT_ID_HERE",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "INSERT_YOUR_API_KEY_HERE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "INSERT_YOUR_OAUTH_CLIENT_ID_HERE",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,36 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "finmate-b8d69",
+          "appId": "1:499015652052:android:e02e6bde664d127dad2141",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "finmate-b8d69",
+          "configurations": {
+            "android": "1:499015652052:android:e02e6bde664d127dad2141",
+            "web": "1:499015652052:web:cbf4d47730cdd49aad2141"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
