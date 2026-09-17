@@ -15,11 +15,18 @@ import 'screens/chatbot_screen.dart';
 import 'screens/education_screen.dart';
 import 'theme.dart';
 
+import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await FlutterDisplayMode.setHighRefreshRate();
+  } catch (e) {
+    debugPrint("Failed to set high refresh rate: $e");
+  }
+  
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,

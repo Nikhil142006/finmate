@@ -429,6 +429,16 @@ class DBService extends ChangeNotifier {
       notifyListeners();
     }
   }
+  
+  Future<void> deleteBudget(String id) async {
+    if (_isFirebaseEnabled && _userId != null) {
+      await _db.collection('users').doc(_userId).collection('budgets').doc(id).delete();
+    } else {
+      _mockBudgets.removeWhere((b) => b.id == id);
+      _notifyAllMockStreams();
+      notifyListeners();
+    }
+  }
 
   // MUTATIONS - Goals
   Future<void> addGoal(String name, double targetAmount, DateTime deadline, double monthlyContribution) async {
@@ -469,6 +479,16 @@ class DBService extends ChangeNotifier {
         _notifyAllMockStreams();
         notifyListeners();
       }
+    }
+  }
+  
+  Future<void> deleteGoal(String id) async {
+    if (_isFirebaseEnabled && _userId != null) {
+      await _db.collection('users').doc(_userId).collection('goals').doc(id).delete();
+    } else {
+      _mockGoals.removeWhere((g) => g.id == id);
+      _notifyAllMockStreams();
+      notifyListeners();
     }
   }
 

@@ -31,7 +31,8 @@ class _BudgetScreenState extends State<BudgetScreen> {
       appBar: AppBar(
         title: const Text('Budgets', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -0.5)),
       ),
-      body: Column(
+      body: ListView(
+        physics: const BouncingScrollPhysics(),
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -76,11 +77,12 @@ class _BudgetScreenState extends State<BudgetScreen> {
                       ),
                       const SizedBox(width: 12),
                       ElevatedButton(
-                        onPressed: () async {
+                        onPressed: () {
+                          FocusScope.of(context).unfocus();
                           final limit = double.tryParse(_limitController.text) ?? 0.0;
                           if (limit <= 0) return;
                           
-                          await dbService.addBudget(_selectedCategory, limit);
+                          dbService.addBudget(_selectedCategory, limit);
                           _limitController.clear();
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -106,40 +108,39 @@ class _BudgetScreenState extends State<BudgetScreen> {
             ),
           ),
           
-          Expanded(
-            child: StreamBuilder<List<BudgetModel>>(
-              stream: dbService.getBudgetsStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Center(child: CircularProgressIndicator(color: primaryColor));
-                }
+          StreamBuilder<List<BudgetModel>>(
+            stream: dbService.getBudgetsStream(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: Padding(padding: EdgeInsets.all(32.0), child: CircularProgressIndicator()));
+              }
 
-                final budgets = snapshot.data ?? [];
-                if (budgets.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.donut_large_rounded, size: 80, color: Colors.grey.withOpacity(0.3)),
-                        const SizedBox(height: 24),
-                        const Text('No Budgets Set', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
-                        const SizedBox(height: 12),
-                        const Text('Set monthly limits to keep expenses controlled.', style: TextStyle(color: Colors.grey, fontSize: 14)),
-                      ],
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  itemCount: budgets.length,
-                  physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 100),
-                  itemBuilder: (context, index) {
-                    return _buildBudgetRow(budgets[index], primaryColor);
-                  },
+              final budgets = snapshot.data ?? [];
+              if (budgets.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(32.0),
+                  child: Column(
+                    children: [
+                      Icon(Icons.donut_large_rounded, size: 80, color: Colors.grey.withOpacity(0.3)),
+                      const SizedBox(height: 24),
+                      const Text('No Budgets Set', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+                      const SizedBox(height: 12),
+                      const Text('Set monthly limits to keep expenses controlled.', style: TextStyle(color: Colors.grey, fontSize: 14)),
+                    ],
+                  ),
                 );
-              },
-            ),
+              }
+
+              return ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: budgets.length,
+                padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 120),
+                itemBuilder: (context, index) {
+                  return _buildBudgetRow(budgets[index], primaryColor);
+                },
+              );
+            },
           ),
         ],
       ),
@@ -166,60 +167,77 @@ class _BudgetScreenState extends State<BudgetScreen> {
       statusIcon = Icons.warning_amber_rounded;
     }
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: GlassCard(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(b.category, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-                Row(
-                  children: [
-                    Icon(statusIcon, color: barColor, size: 16),
-                    const SizedBox(width: 6),
-                    Text(statusText, style: TextStyle(color: barColor, fontWeight: FontWeight.w900, fontSize: 11)),
-                  ],
+    return Dismissible(
+      key: Key(b.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: Colors.redAccent,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        child: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 28),
+      ),
+      onDismissed: (direction) {
+        Provider.of<DBService>(context, listen: false).deleteBudget(b.id);
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: GlassCard(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(b.category, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                  Row(
+                    children: [
+                      Icon(statusIcon, color: barColor, size: 16),
+                      const SizedBox(width: 6),
+                      Text(statusText, style: TextStyle(color: barColor, fontWeight: FontWeight.w900, fontSize: 11)),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: LinearProgressIndicator(
+                  value: pct.clamp(0.0, 1.0),
+                  minHeight: 12,
+                  backgroundColor: Colors.grey.withOpacity(0.12),
+                  valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Spent: ${currency.format(spent)}',
+                    style: TextStyle(color: isOverBudget(spent, limit) ? Colors.redAccent : Colors.grey, fontSize: 13, fontWeight: FontWeight.w800),
+                  ),
+                  Text(
+                    'Limit: ${limit > 0 ? currency.format(limit) : "Unset"}',
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
+                  ),
+                ],
+              ),
+              if (limit > 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Utilization: ${(pct * 100).toStringAsFixed(1)}%',
+                  style: TextStyle(fontSize: 11, color: barColor, fontWeight: FontWeight.w900),
                 ),
               ],
-            ),
-            const SizedBox(height: 16),
-            
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: LinearProgressIndicator(
-                value: pct.clamp(0.0, 1.0),
-                minHeight: 12,
-                backgroundColor: Colors.grey.withOpacity(0.12),
-                valueColor: AlwaysStoppedAnimation<Color>(barColor),
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Spent: ${currency.format(spent)}',
-                  style: TextStyle(color: isOverBudget(spent, limit) ? Colors.redAccent : Colors.grey, fontSize: 13, fontWeight: FontWeight.w800),
-                ),
-                Text(
-                  'Limit: ${limit > 0 ? currency.format(limit) : "Unset"}',
-                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
-                ),
-              ],
-            ),
-            if (limit > 0) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Utilization: ${(pct * 100).toStringAsFixed(1)}%',
-                style: TextStyle(fontSize: 11, color: barColor, fontWeight: FontWeight.w900),
-              ),
             ],
-          ],
+          ),
         ),
       ),
     );

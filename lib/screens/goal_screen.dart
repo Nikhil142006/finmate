@@ -48,7 +48,8 @@ class _GoalScreenState extends State<GoalScreen> {
       appBar: AppBar(
         title: const Text('Financial Goals', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -0.5)),
       ),
-      body: Column(
+      body: ListView(
+        physics: const BouncingScrollPhysics(),
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -119,18 +120,19 @@ class _GoalScreenState extends State<GoalScreen> {
                         ),
                         const SizedBox(height: 16),
                         ElevatedButton(
-                          onPressed: () async {
+                          onPressed: () {
                             final name = _nameController.text.trim();
                             final target = double.tryParse(_targetController.text) ?? 0.0;
                             final contrib = double.tryParse(_contribController.text) ?? 0.0;
 
                             if (name.isEmpty || target <= 0 || contrib <= 0) return;
                             
-                            await dbService.addGoal(name, target, _selectedDate, contrib);
+                            dbService.addGoal(name, target, _selectedDate, contrib);
                             
                             _nameController.clear();
                             _targetController.clear();
                             _contribController.clear();
+                            FocusScope.of(context).unfocus();
                             
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -157,40 +159,39 @@ class _GoalScreenState extends State<GoalScreen> {
             ),
           ),
           
-          Expanded(
-            child: StreamBuilder<List<GoalModel>>(
-              stream: dbService.getGoalsStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Center(child: CircularProgressIndicator(color: primaryColor));
-                }
+          StreamBuilder<List<GoalModel>>(
+            stream: dbService.getGoalsStream(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: Padding(padding: EdgeInsets.all(32.0), child: CircularProgressIndicator()));
+              }
 
-                final goals = snapshot.data ?? [];
-                if (goals.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.flag_rounded, size: 80, color: Colors.grey.withOpacity(0.3)),
-                        const SizedBox(height: 24),
-                        const Text('No Saving Goals', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
-                        const SizedBox(height: 12),
-                        const Text('Track deadlines and watch your wealth compound.', style: TextStyle(color: Colors.grey, fontSize: 14)),
-                      ],
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  itemCount: goals.length,
-                  physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 100),
-                  itemBuilder: (context, index) {
-                    return _buildGoalRow(goals[index], dbService, primaryColor);
-                  },
+              final goals = snapshot.data ?? [];
+              if (goals.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(32.0),
+                  child: Column(
+                    children: [
+                      Icon(Icons.flag_rounded, size: 80, color: Colors.grey.withOpacity(0.3)),
+                      const SizedBox(height: 24),
+                      const Text('No Saving Goals', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+                      const SizedBox(height: 12),
+                      const Text('Track deadlines and watch your wealth compound.', style: TextStyle(color: Colors.grey, fontSize: 14)),
+                    ],
+                  ),
                 );
-              },
-            ),
+              }
+
+              return ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: goals.length,
+                padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 120),
+                itemBuilder: (context, index) {
+                  return _buildGoalRow(goals[index], dbService, primaryColor);
+                },
+              );
+            },
           ),
         ],
       ),
@@ -202,65 +203,82 @@ class _GoalScreenState extends State<GoalScreen> {
     final double pct = g.targetAmount > 0 ? (g.currentAmount / g.targetAmount) : 0.0;
     final deadlineStr = DateFormat('MMM yyyy').format(g.deadline);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: GlassCard(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(g.name, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                  child: Text('Target: $deadlineStr', style: TextStyle(fontSize: 11, color: primaryColor, fontWeight: FontWeight.w900)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Saved: ${currency.format(g.currentAmount)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: primaryColor)),
-                Text('Goal: ${currency.format(g.targetAmount)}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
-              ],
-            ),
-            const SizedBox(height: 12),
-            
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: LinearProgressIndicator(
-                value: pct.clamp(0.0, 1.0),
-                minHeight: 12,
-                backgroundColor: Colors.grey.withOpacity(0.12),
-                valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(child: Text('Monthly Contribution: ${currency.format(g.monthlyContribution)}', style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)),
-                ElevatedButton.icon(
-                  onPressed: () => _showDepositDialog(g.id, g.name, dbService, primaryColor),
-                  icon: const Icon(Icons.add_rounded, size: 16),
-                  label: const Text('Add Money', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor.withOpacity(0.1),
-                    foregroundColor: primaryColor,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return Dismissible(
+      key: Key(g.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: Colors.redAccent,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        child: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 28),
+      ),
+      onDismissed: (direction) {
+        dbService.deleteGoal(g.id);
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: GlassCard(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(g.name, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                    child: Text('Target: $deadlineStr', style: TextStyle(fontSize: 11, color: primaryColor, fontWeight: FontWeight.w900)),
                   ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Saved: ${currency.format(g.currentAmount)}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: primaryColor)),
+                  Text('Goal: ${currency.format(g.targetAmount)}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: LinearProgressIndicator(
+                  value: pct.clamp(0.0, 1.0),
+                  minHeight: 12,
+                  backgroundColor: Colors.grey.withOpacity(0.12),
+                  valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
                 ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 16),
+              
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(child: Text('Monthly Contribution: ${currency.format(g.monthlyContribution)}', style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)),
+                  ElevatedButton.icon(
+                    onPressed: () => _showDepositDialog(g.id, g.name, dbService, primaryColor),
+                    icon: const Icon(Icons.add_rounded, size: 16),
+                    label: const Text('Add Money', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor.withOpacity(0.1),
+                      foregroundColor: primaryColor,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -290,11 +308,11 @@ class _GoalScreenState extends State<GoalScreen> {
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () async {
+              onPressed: () {
                 final amt = double.tryParse(depositController.value.text) ?? 0.0;
                 if (amt <= 0) return;
                 
-                await dbService.contributeToGoal(id, amt);
+                dbService.contributeToGoal(id, amt);
                 if (context.mounted) Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
 import '../services/db_service.dart';
 import '../services/sms_parser_service.dart';
 import '../services/ml_service_client.dart';
@@ -26,6 +27,11 @@ class _TransactionScreenState extends State<TransactionScreen> with SingleTicker
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() {}); // Rebuild to show/hide FAB based on tab index
+      }
+    });
   }
 
   @override
@@ -435,25 +441,48 @@ class _TransactionScreenState extends State<TransactionScreen> with SingleTicker
   }
 
   void _simulateStatementUpload(DBService dbService, MLServiceClient mlClient) async {
-    setState(() => _isSyncingStatement = true);
-    await Future.delayed(const Duration(seconds: 2));
-    final parsed = await mlClient.parseStatementFile([], "phonepe_statement_june.csv");
-    
-    for (var tx in parsed) {
-      await dbService.addTransaction(
-        tx['amount'], tx['type'], tx['category'],
-        DateTime.now().subtract(const Duration(days: 4)),
-        tx['description'], tx['paymentMethod'], source: 'Statement',
-      );
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'csv'],
+      withData: true,
+    );
+
+    if (result == null || result.files.isEmpty) {
+      return; // User canceled the picker
     }
+
+    setState(() => _isSyncingStatement = true);
     
-    setState(() => _isSyncingStatement = false);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Imported ${parsed.length} transactions!'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-      ));
-      _tabController.animateTo(0);
+    final fileBytes = result.files.first.bytes ?? <int>[];
+    final filename = result.files.first.name;
+
+    try {
+      final parsed = await mlClient.parseStatementFile(fileBytes, filename);
+      
+      for (var tx in parsed) {
+        dbService.addTransaction(
+          tx['amount'], tx['type'], tx['category'],
+          DateTime.now().subtract(const Duration(days: 4)),
+          tx['description'], tx['paymentMethod'], source: 'Statement',
+        );
+      }
+      
+      setState(() => _isSyncingStatement = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Imported ${parsed.length} transactions from $filename!'),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+        ));
+        _tabController.animateTo(0);
+      }
+    } catch (e) {
+      setState(() => _isSyncingStatement = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to parse document: $e'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
     }
   }
 
@@ -477,21 +506,22 @@ class _TransactionScreenState extends State<TransactionScreen> with SingleTicker
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            return GlassCard(
-              borderRadius: 32,
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom + 32,
-                left: 24, right: 24, top: 32,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('New Transaction', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
-                      TextButton.icon(
+            return SingleChildScrollView(
+              child: GlassCard(
+                borderRadius: 32,
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 32,
+                  left: 24, right: 24, top: 32,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Expanded(child: Text('New Transaction', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900))),
+                        TextButton.icon(
                         icon: _isScanningReceipt
                             ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
                             : Icon(Icons.document_scanner_rounded, color: primaryColor),
@@ -594,16 +624,16 @@ class _TransactionScreenState extends State<TransactionScreen> with SingleTicker
                   ),
                   const SizedBox(height: 32),
 
-                  ElevatedButton(
-                    onPressed: () async {
-                      final amt = double.tryParse(amountController.text) ?? 0.0;
-                      final desc = descController.text.trim();
-                      final cat = catController.text.trim().isEmpty ? 'Others' : catController.text.trim();
-                      if (amt <= 0 || desc.isEmpty) return;
+                    ElevatedButton(
+                      onPressed: () {
+                        final amt = double.tryParse(amountController.text) ?? 0.0;
+                        final desc = descController.text.trim().isEmpty ? 'Transaction' : descController.text.trim();
+                        final cat = catController.text.trim().isEmpty ? 'Others' : catController.text.trim();
+                        if (amt <= 0) return;
 
-                      await dbService.addTransaction(amt, type, cat, DateTime.now(), desc, paymentMethod);
-                      if (context.mounted) Navigator.pop(context);
-                    },
+                        dbService.addTransaction(amt, type, cat, DateTime.now(), desc, paymentMethod);
+                        if (context.mounted) Navigator.pop(context);
+                      },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primaryColor,
                       foregroundColor: Colors.white,
@@ -614,8 +644,9 @@ class _TransactionScreenState extends State<TransactionScreen> with SingleTicker
                   ),
                 ],
               ),
-            );
-          },
+            ),
+          );
+        },
         );
       },
     );

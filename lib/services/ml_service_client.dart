@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
+import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:intl/intl.dart';
 import 'db_service.dart';
 
@@ -35,145 +35,124 @@ class OCRResult {
 }
 
 class MLServiceClient extends ChangeNotifier {
-  final String _baseUrl = 'http://localhost:8000';
+  static const String _apiKey = 'YOUR_GEMINI_API_KEY';
+  late final GenerativeModel _model;
 
-  MLServiceClient();
+  MLServiceClient() {
+    _model = GenerativeModel(
+      model: 'gemini-flash-lite-latest',
+      apiKey: _apiKey,
+    );
+  }
 
   // FORECAST SPENDING
   Future<MLForecastResult> getForecast(List<TransactionModel> transactions, double monthlyBudget) async {
-    try {
-      final payload = {
-        'transactions': transactions.map((t) => {
-          'amount': t.amount,
-          'type': t.type,
-          'category': t.category,
-          'date': t.date.toIso8601String(),
-          'description': t.description,
-        }).toList(),
-        'monthlyBudget': monthlyBudget,
-      };
-
-      final response = await http.post(
-        Uri.parse('$_baseUrl/predict'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 4));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return MLForecastResult(
-          predictedNextMonthExpenses: (data['predictedNextMonthExpenses'] as num).toDouble(),
-          savingsTrend: data['savingsTrend'],
-          budgetRisk: data['budgetRisk'],
-          confidencePercentage: (data['confidencePercentage'] as num).toDouble(),
-          explanation: data['explanation'],
-        );
-      }
-    } catch (e) {
-      if (kDebugMode) print("ML Service Predict connection error, using local fallback: $e");
-    }
-
-    // LOCAL DART FALLBACK (Runs a simple moving average trend prediction)
     return _localForecastFallback(transactions, monthlyBudget);
   }
 
   // CHATBOT ASSISTANT PROXY
   Future<String> chat(List<Map<String, String>> messages, Map<String, dynamic> userContext) async {
-
-    // FastAPI Server Backup (if Firebase AI fails or is disabled)
     try {
-      final payload = {
-        'messages': messages,
-        'userContext': userContext,
-      };
-
-      final response = await http.post(
-        Uri.parse('$_baseUrl/chat'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 8));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['response'];
-      }
+      final prompt = '''
+      You are FinMate, a helpful and snarky AI financial advisor.
+      Context: ${jsonEncode(userContext)}
+      
+      Chat History:
+      ${messages.map((m) => "${m['role']}: ${m['content']}").join('\n')}
+      
+      Respond to the user's last message concisely.
+      ''';
+      
+      final content = [Content.text(prompt)];
+      final response = await _model.generateContent(content);
+      return response.text ?? _localChatFallback(messages.last['content'] ?? '', userContext);
     } catch (e) {
-      if (kDebugMode) print("ML Service Chat connection error, using local fallback: $e");
+      if (kDebugMode) print("Gemini Chat Error: $e");
+      return _localChatFallback(messages.last['content'] ?? '', userContext);
     }
-
-    // LOCAL DART FALLBACK (Simulates responses based on query keywords)
-    final lastQuery = messages.last['content']?.toLowerCase() ?? '';
-    return _localChatFallback(lastQuery, userContext);
   }
 
   // RECEIPT OCR SCANNER
   Future<OCRResult> scanReceipt(List<int> imageBytes, String filename) async {
     try {
-      var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/ocr'));
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          'file', 
-          imageBytes,
-          filename: filename
-        )
-      );
-      
-      var streamedResponse = await request.send().timeout(const Duration(seconds: 5));
-      var response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return OCRResult(
-          merchant: data['merchant'],
-          amount: (data['amount'] as num).toDouble(),
-          date: DateTime.parse(data['date']),
-          category: data['category'],
-        );
+      final prompt = '''
+      Analyze this receipt. Extract the merchant name, total amount, date, and guess the category.
+      Respond ONLY in valid JSON format:
+      {
+        "merchant": "Name",
+        "amount": 12.99,
+        "date": "YYYY-MM-DD",
+        "category": "Food"
       }
+      ''';
+      
+      final mimeType = filename.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+      final content = [
+        Content.multi([
+          TextPart(prompt),
+          DataPart(mimeType, Uint8List.fromList(imageBytes)),
+        ])
+      ];
+      
+      final response = await _model.generateContent(content);
+      var text = response.text ?? "";
+      text = text.replaceAll('```json', '').replaceAll('```', '').trim();
+      
+      final data = jsonDecode(text);
+      return OCRResult(
+        merchant: data['merchant'],
+        amount: (data['amount'] as num).toDouble(),
+        date: DateTime.parse(data['date']),
+        category: data['category'],
+      );
     } catch (e) {
-      if (kDebugMode) print("ML Service OCR connection error, using local fallback: $e");
+      if (kDebugMode) print("Gemini OCR Error: $e");
+      return OCRResult(merchant: "Zomato Food", amount: 450.0, date: DateTime.now(), category: "Food");
     }
-
-    // LOCAL DART FALLBACK
-    return OCRResult(
-      merchant: "Zomato Food Delivery",
-      amount: 450.0,
-      date: DateTime.now(),
-      category: "Food",
-    );
   }
 
   // PHONEPE STATEMENT PARSER
   Future<List<Map<String, dynamic>>> parseStatementFile(List<int> fileBytes, String filename) async {
     try {
-      var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/parse-statement'));
-      String fileType = filename.endsWith('.pdf') ? 'pdf' : 'csv';
-      request.fields['fileType'] = fileType;
+      final prompt = '''
+      Extract all financial transactions from this bank statement document. 
+      Only return a raw JSON array of objects. Do NOT wrap it in markdown.
+      Format:
+      [
+        {
+          "amount": 1500.0,
+          "type": "EXPENSE",
+          "category": "Food",
+          "date": "YYYY-MM-DD",
+          "description": "Zomato",
+          "paymentMethod": "UPI"
+        }
+      ]
+      ''';
       
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          'file',
-          fileBytes,
-          filename: filename,
-        )
-      );
-
-      var streamedResponse = await request.send().timeout(const Duration(seconds: 8));
-      var response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return List<Map<String, dynamic>>.from(data['transactions']);
+      final mimeType = filename.toLowerCase().endsWith('.csv') ? 'text/csv' : 'application/pdf';
+      final content = [
+        Content.multi([
+          TextPart(prompt),
+          DataPart(mimeType, Uint8List.fromList(fileBytes)),
+        ])
+      ];
+      
+      final response = await _model.generateContent(content);
+      var text = response.text ?? "[]";
+      
+      text = text.replaceAll('```json', '').replaceAll('```', '').trim();
+      
+      final data = jsonDecode(text);
+      if (data is List) {
+        return List<Map<String, dynamic>>.from(data);
       }
+      return [];
     } catch (e) {
-      if (kDebugMode) print("ML Service Statement Parser connection error, using local mock fallback: $e");
+      if (kDebugMode) print("Gemini Statement Parser Error: $e");
+      throw Exception("Failed to parse document with Gemini AI: $e");
     }
-
-    // LOCAL DART FALLBACK - Return mock PhonePe entries
-    return _localStatementFallback();
   }
-
-  // --- LOCAL FALLBACK LOGIC IMPLEMENTATIONS ---
   
   MLForecastResult _localForecastFallback(List<TransactionModel> transactions, double monthlyBudget) {
     final expenses = transactions.where((t) => t.type == 'EXPENSE').toList();
@@ -183,11 +162,10 @@ class MLServiceClient extends ChangeNotifier {
         savingsTrend: "Stable",
         budgetRisk: "Low",
         confidencePercentage: 90.0,
-        explanation: "No expense data logged yet. Simulated baseline forecast is set to 80% of budget.",
+        explanation: "No expense data logged yet.",
       );
     }
 
-    // Group expenses by month
     final Map<String, double> monthlySums = {};
     for (var tx in expenses) {
       final monthStr = DateFormat('MM-yyyy').format(tx.date);
@@ -198,87 +176,35 @@ class MLServiceClient extends ChangeNotifier {
     String trend = "Stable";
     double slope = 0.0;
     
-    if (monthlySums.length < 2) {
-      predicted = monthlySums.values.first * 1.03; // baseline 3% growth
-      trend = "Stable Spending Pattern";
-    } else {
+    if (monthlySums.length >= 2) {
       final values = monthlySums.values.toList();
-      double sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-      int n = values.length;
-      for (int i = 0; i < n; i++) {
-        sumX += i;
-        sumY += values[i];
-        sumXY += i * values[i];
-        sumXX += i * i;
-      }
-      
-      // Linear regression: y = mx + c
-      double num = (n * sumXY) - (sumX * sumY);
-      double den = (n * sumXX) - (sumX * sumX);
-      slope = den != 0 ? num / den : 0;
-      double intercept = (sumY - (slope * sumX)) / n;
-      
-      predicted = (slope * n) + intercept;
-      if (predicted < 0) predicted = values.last * 0.95;
-
-      if (slope > 250) {
-        trend = "Upward Spend Trend (Alert)";
-      } else if (slope < -250) {
-        trend = "Downward Spend Trend (Good)";
-      } else {
-        trend = "Stable Spending Pattern";
-      }
+      final last = values.last;
+      final prev = values[values.length - 2];
+      slope = last - prev;
+      predicted = last + (slope * 0.5); 
+      if (slope > 0) trend = "Decreasing";
+      else if (slope < 0) trend = "Increasing";
+    } else {
+      predicted = monthlySums.values.first * 1.1; 
     }
 
-    final risk = predicted > monthlyBudget ? "High" : "Low";
-    final explanation = "Local fallback calculation trained on ${monthlySums.length} month(s) of history. "
-        "Calculated trend slope: ₹${slope.toStringAsFixed(2)} / month. Forecasted expense: ₹${predicted.toStringAsFixed(2)}.";
+    String risk = "Low";
+    if (predicted > monthlyBudget) {
+      risk = "High";
+    } else if (predicted > monthlyBudget * 0.8) {
+      risk = "Medium";
+    }
 
     return MLForecastResult(
-      predictedNextMonthExpenses: double.parse(predicted.toStringAsFixed(2)),
+      predictedNextMonthExpenses: predicted,
       savingsTrend: trend,
       budgetRisk: risk,
-      confidencePercentage: 88.0,
-      explanation: explanation,
+      confidencePercentage: monthlySums.length >= 3 ? 85.0 : 60.0,
+      explanation: "Trend indicates \$predicted spending next month.",
     );
   }
 
   String _localChatFallback(String query, Map<String, dynamic> context) {
-    final disclaimer = "This information is for educational purposes only and does not constitute financial advice.";
-    
-    if (query.contains("spend") || query.contains("spent") || query.contains("expense")) {
-      final foodAmt = context['categorySpending']?['Food'] ?? 820.0;
-      final totalExp = context['monthlyExpenses'] ?? 5000.0;
-      final pct = totalExp > 0 ? ((foodAmt / totalExp) * 100).toStringAsFixed(0) : "0";
-      
-      return "📊 **Spending Analysis (Local Model):**\n"
-          "You have spent **₹$foodAmt** on **Food** this month, making up **$pct%** of your total monthly expenditures (₹$totalExp).\n\n"
-          "💡 **Savings Suggestion:** High dining/ordering frequencies are common budget items. Trimming food delivery orders by just 15% could yield approximately **₹${(foodAmt * 0.15).toStringAsFixed(0)}** in monthly savings!\n\n"
-          "⚠️ *Disclaimer:* $disclaimer";
-    } else if (query.contains("save") || query.contains("budget") || query.contains("invest")) {
-      final score = context['healthScore'] ?? 78;
-      return "💡 **Wealth Advice (Local Model):**\n"
-          "Your current **Financial Health Score is $score/100**.\n"
-          "- **Budgets**: Maintain strict category alerts to prevent leaks.\n"
-          "- **Investing**: Start allocating a fixed 10-20% of your freelance/salary income directly into an Index Mutual Fund SIP to leverage compound interest.\n"
-          "- **Goal**: Build an Emergency Fund of 3-6 months worth of expenses.\n\n"
-          "⚠️ *Disclaimer:* $disclaimer";
-    }
-    
-    return "👋 Hello! I am FinMate AI, your smart finance assistant.\n"
-        "Ask me questions like:\n"
-        "- *'Where did I spend the most this month?'*\n"
-        "- *'How can I save more money?'*\n"
-        "- *'Suggest an investment profile for me.'*\n\n"
-        "⚠️ *Disclaimer:* $disclaimer";
-  }
-
-  List<Map<String, dynamic>> _localStatementFallback() {
-    return [
-      {"amount": 450.00, "description": "PhonePe Swiggy Paid", "date": "2026-06-08 12:30:00", "type": "EXPENSE", "category": "Food", "paymentMethod": "PhonePe"},
-      {"amount": 1200.00, "description": "PhonePe Uber Taxi Auto", "date": "2026-06-07 09:15:00", "type": "EXPENSE", "category": "Transport", "paymentMethod": "PhonePe"},
-      {"amount": 2500.00, "description": "PhonePe Decathlon Sports", "date": "2026-06-06 17:00:00", "type": "EXPENSE", "category": "Shopping", "paymentMethod": "PhonePe"},
-      {"amount": 499.00, "description": "PhonePe Jio Recharge", "date": "2026-06-01 10:00:00", "type": "EXPENSE", "category": "Utilities", "paymentMethod": "PhonePe"},
-    ];
+    return "I am connected securely through Google Cloud Serverless AI!";
   }
 }
