@@ -128,43 +128,15 @@ git clone https://github.com/Nikhil142006/finmate.git
 cd finmate
 ```
 
-### Step 2: Configure Firebase (⚠️ MANDATORY)
 
-This project requires **Firebase credentials** to function. You must set up your own Firebase project:
 
-1. **Create Firebase Project**:
-   - Visit [Firebase Console](https://console.firebase.google.com/)
-   - Create a new project
-
-2. **Register Apps**:
-   - Add an **Android App** (package: `com.finmate.frontend`)
-   - Download `google-services.json`
-   - Add an **iOS App**
-   - Download `GoogleService-Info.plist`
-
-3. **Update Android Configuration**:
-   - Replace `android/app/google-services.json` with your downloaded file
-   - Ensure all `INSERT_YOUR_...` placeholders are replaced
-
-4. **Update Dart Configuration**:
-   - Open `lib/firebase_options.dart`
-   - Replace all `INSERT_YOUR_...` placeholders with your Firebase credentials:
-     - API keys
-     - Project IDs
-     - Web client IDs
-
-5. **Enable Firebase Services**:
-   - Firestore Database (test mode for development)
-   - Authentication (Google Sign-In)
-   - Cloud Storage (optional)
-
-### Step 3: Install Dependencies
+### Step 2: Install Dependencies
 
 ```bash
 flutter pub get
 ```
 
-### Step 4: Run the App
+### Step 3: Run the App
 
 ```bash
 # On connected device/emulator
@@ -216,7 +188,7 @@ We welcome contributions! Whether it's bug fixes, features, or improvements, you
 - ✅ Test your changes thoroughly
 - ✅ Follow Dart/Flutter style guidelines
 - ✅ Add comments for complex logic
-- ✅ **Do NOT commit** real Firebase credentials
+- ✅ **Do NOT commit** real API credentials
 - ✅ Keep `.gitignore` updated
 
 ### Development Setup
